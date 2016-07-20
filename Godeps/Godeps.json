@@ -1,4 +1,4 @@
-{
+{ 
 	"ImportPath": "k8s.io/kubernetes",
 	"GoVersion": "go1.5",
 	"Packages": [
@@ -386,6 +386,11 @@
 			"ImportPath": "github.com/docker/docker/pkg/timeutils",
 			"Comment": "v1.4.1-4831-g0f5c9d3",
 			"Rev": "0f5c9d301b9b1cca66b3ea0f9dec3b5317d3686d"
+		},
+		{
+			"ImportPath": "github.com/docker/docker/pkg/tlsconfig",
+			"Comment": "v1.4.1-4045-g2b27fe1",
+			"Rev": "2b27fe17a1b3fb8472fde96d768fa70996adf201"
 		},
 		{
 			"ImportPath": "github.com/docker/docker/pkg/units",
@@ -975,7 +980,7 @@
 		},
 		{
 			"ImportPath": "golang.org/x/net/http2",
-			"Rev": "c2528b2dd8352441850638a8bb678c2ad056fd3e"
+			"Rev": "ea47fc708ee3e20177f3ca3716217c4ab75942cb"
 		},
 		{
 			"ImportPath": "golang.org/x/net/internal/timeseries",
@@ -1035,7 +1040,7 @@
 		},
 		{
 			"ImportPath": "google.golang.org/grpc",
-			"Rev": "933601d8cd6418a8a891bd9075a7161b0a67badb"
+			"Rev": "5aeebcd810669f5d8e682b352ad8128b253d21f8"
 		},
 		{
 			"ImportPath": "gopkg.in/natefinch/lumberjack.v2",

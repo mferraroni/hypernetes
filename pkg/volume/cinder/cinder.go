@@ -19,6 +19,7 @@ package cinder
 import (
 	"errors"
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path"
 
@@ -27,11 +28,16 @@ import (
 	"k8s.io/kubernetes/pkg/api/resource"
 	"k8s.io/kubernetes/pkg/cloudprovider/providers/openstack"
 	"k8s.io/kubernetes/pkg/types"
+	"k8s.io/kubernetes/pkg/util"
 	"k8s.io/kubernetes/pkg/util/exec"
 	"k8s.io/kubernetes/pkg/util/keymutex"
 	"k8s.io/kubernetes/pkg/util/mount"
 	"k8s.io/kubernetes/pkg/util/strings"
 	"k8s.io/kubernetes/pkg/volume"
+)
+
+const (
+	OpenStackCloudProviderTagFile = "OpenStackCloudProviderTagFile"
 )
 
 // This is the primary entrypoint for volume plugins.
@@ -75,10 +81,11 @@ func (plugin *cinderPlugin) GetAccessModes() []api.PersistentVolumeAccessMode {
 }
 
 func (plugin *cinderPlugin) NewBuilder(spec *volume.Spec, pod *api.Pod, _ volume.VolumeOptions) (volume.Builder, error) {
-	return plugin.newBuilderInternal(spec, pod.UID, &CinderDiskUtil{}, plugin.host.GetMounter())
+	return plugin.newBuilderInternal(spec, pod.UID, newCinderDiskUtil(plugin.host.GetCinderConfig(),
+		plugin.host.IsNoMountSupported()), plugin.host.GetMounter(), plugin.host.IsNoMountSupported())
 }
 
-func (plugin *cinderPlugin) newBuilderInternal(spec *volume.Spec, podUID types.UID, manager cdManager, mounter mount.Interface) (volume.Builder, error) {
+func (plugin *cinderPlugin) newBuilderInternal(spec *volume.Spec, podUID types.UID, manager cdManager, mounter mount.Interface, isNoMountSupported bool) (volume.Builder, error) {
 	var cinder *api.CinderVolumeSource
 	if spec.Volume != nil && spec.Volume.Cinder != nil {
 		cinder = spec.Volume.Cinder
@@ -101,22 +108,30 @@ func (plugin *cinderPlugin) newBuilderInternal(spec *volume.Spec, podUID types.U
 		},
 		fsType:             fsType,
 		readOnly:           readOnly,
+		withOpenStackCP:    cinder.WithOpenStackCP,
+		isNoMountSupported: isNoMountSupported,
 		blockDeviceMounter: &mount.SafeFormatAndMount{mounter, exec.New()}}, nil
 }
 
 func (plugin *cinderPlugin) NewCleaner(volName string, podUID types.UID) (volume.Cleaner, error) {
-	return plugin.newCleanerInternal(volName, podUID, &CinderDiskUtil{}, plugin.host.GetMounter())
+	return plugin.newCleanerInternal(volName, podUID, newCinderDiskUtil(plugin.host.GetCinderConfig(),
+		plugin.host.IsNoMountSupported()), plugin.host.GetMounter(), plugin.host.IsNoMountSupported())
 }
 
-func (plugin *cinderPlugin) newCleanerInternal(volName string, podUID types.UID, manager cdManager, mounter mount.Interface) (volume.Cleaner, error) {
-	return &cinderVolumeCleaner{
+func (plugin *cinderPlugin) newCleanerInternal(volName string, podUID types.UID, manager cdManager, mounter mount.Interface, isNoMountSupported bool) (volume.Cleaner, error) {
+	clearner := cinderVolumeCleaner{
 		&cinderVolume{
 			podUID:  podUID,
 			volName: volName,
 			manager: manager,
 			mounter: mounter,
 			plugin:  plugin,
-		}}, nil
+		},
+		false,
+		isNoMountSupported,
+	}
+
+	return &clearner, nil
 }
 
 func (plugin *cinderPlugin) NewDeleter(spec *volume.Spec) (volume.Deleter, error) {
@@ -186,6 +201,8 @@ type cinderVolumeBuilder struct {
 	fsType             string
 	readOnly           bool
 	blockDeviceMounter *mount.SafeFormatAndMount
+	withOpenStackCP    bool
+	isNoMountSupported bool
 }
 
 // cinderPersistentDisk volumes are disk resources provided by C3
@@ -207,12 +224,15 @@ type cinderVolume struct {
 	mounter mount.Interface
 	// diskMounter provides the interface that is used to mount the actual block device.
 	blockDeviceMounter mount.Interface
-	plugin             *cinderPlugin
 	volume.MetricsNil
+
+	// metadata provides meta of the volume
+	metadata map[string]interface{}
+	plugin   *cinderPlugin
 }
 
-func detachDiskLogError(cd *cinderVolume) {
-	err := cd.manager.DetachDisk(&cinderVolumeCleaner{cd})
+func detachDiskLogError(cd *cinderVolume, isNoMountSupported bool) {
+	err := cd.manager.DetachDisk(&cinderVolumeCleaner{cd, true, isNoMountSupported})
 	if err != nil {
 		glog.Warningf("Failed to detach disk: %v (%v)", cd, err)
 	}
@@ -254,16 +274,36 @@ func (b *cinderVolumeBuilder) SetUpAt(dir string, fsGroup *int64) error {
 	}
 	glog.V(3).Infof("Cinder volume %s attached", b.pdName)
 
-	options := []string{"bind"}
-	if b.readOnly {
-		options = append(options, "ro")
-	}
-
 	if err := os.MkdirAll(dir, 0750); err != nil {
 		// TODO: we should really eject the attach/detach out into its own control loop.
 		glog.V(4).Infof("Could not create directory %s: %v", dir, err)
-		detachDiskLogError(b.cinderVolume)
+		detachDiskLogError(b.cinderVolume, b.isNoMountSupported)
 		return err
+	}
+
+	// Without openstack cloud provider, create a tag file
+	if !b.withOpenStackCP && b.isNoMountSupported {
+		fw, err := os.Create(path.Join(dir, OpenStackCloudProviderTagFile))
+		if err != nil {
+			os.Remove(dir)
+			detachDiskLogError(b.cinderVolume, b.isNoMountSupported)
+			return err
+		}
+
+		_, err = fw.WriteString(b.pdName)
+		if err != nil {
+			os.Remove(dir)
+			detachDiskLogError(b.cinderVolume, b.isNoMountSupported)
+			return err
+		}
+
+		fw.Close()
+		return nil
+	}
+
+	options := []string{"bind"}
+	if b.readOnly {
+		options = append(options, "ro")
 	}
 
 	// Perform a bind mount to the full path to allow duplicate mounts of the same PD.
@@ -293,7 +333,7 @@ func (b *cinderVolumeBuilder) SetUpAt(dir string, fsGroup *int64) error {
 		}
 		os.Remove(dir)
 		// TODO: we should really eject the attach/detach out into its own control loop.
-		detachDiskLogError(b.cinderVolume)
+		detachDiskLogError(b.cinderVolume, b.isNoMountSupported)
 		return err
 	}
 
@@ -314,8 +354,15 @@ func (cd *cinderVolume) GetPath() string {
 	return cd.plugin.host.GetPodVolumeDir(cd.podUID, strings.EscapeQualifiedNameForDisk(name), cd.volName)
 }
 
+// GetMetadata returns the metadata of the volume
+func (cd *cinderVolume) GetMetaData() map[string]interface{} {
+	return cd.metadata
+}
+
 type cinderVolumeCleaner struct {
 	*cinderVolume
+	withOpenStackCP    bool
+	isNoMountSupported bool
 }
 
 var _ volume.Cleaner = &cinderVolumeCleaner{}
@@ -333,14 +380,34 @@ func (c *cinderVolumeCleaner) TearDownAt(dir string) error {
 		glog.V(4).Infof("IsLikelyNotMountPoint check failed: %v", err)
 		return err
 	}
-	if notmnt {
-		glog.V(4).Infof("Nothing is mounted to %s, ignoring", dir)
-		return os.Remove(dir)
+
+	exist, _ := util.FileExists(path.Join(dir, OpenStackCloudProviderTagFile))
+	if exist {
+		c.withOpenStackCP = false
+	} else {
+		c.withOpenStackCP = true
 	}
 
-	// Find Cinder volumeID to lock the right volume
-	// TODO: refactor VolumePlugin.NewCleaner to get full volume.Spec just like
-	// NewBuilder. We could then find volumeID there without probing MountRefs.
+	if notmnt {
+		// Find Cinder volumeID to lock the right volume
+		// TODO: refactor VolumePlugin.NewCleaner to get full volume.Spec just like
+		// NewBuilder. We could then find volumeID there without probing MountRefs.
+
+		if !c.withOpenStackCP && c.isNoMountSupported {
+			volumeID, err := ioutil.ReadFile(path.Join(dir, OpenStackCloudProviderTagFile))
+			if err != nil {
+				return err
+			}
+
+			c.pdName = string(volumeID)
+			if err := c.manager.DetachDisk(c); err != nil {
+				return err
+			}
+		}
+
+		return os.RemoveAll(dir)
+	}
+
 	refs, err := mount.GetMountRefs(c.mounter, dir)
 	if err != nil {
 		glog.V(4).Infof("GetMountRefs failed: %v", err)

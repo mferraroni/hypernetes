@@ -35,6 +35,7 @@ import (
 	clientcmdapi "k8s.io/kubernetes/pkg/client/unversioned/clientcmd/api"
 	"k8s.io/kubernetes/pkg/proxy"
 	proxyconfig "k8s.io/kubernetes/pkg/proxy/config"
+	"k8s.io/kubernetes/pkg/proxy/haproxy"
 	"k8s.io/kubernetes/pkg/proxy/iptables"
 	"k8s.io/kubernetes/pkg/proxy/userspace"
 	"k8s.io/kubernetes/pkg/types"
@@ -68,12 +69,13 @@ const (
 	proxyModeUserspace              = "userspace"
 	proxyModeIptables               = "iptables"
 	experimentalProxyModeAnnotation = options.ExperimentalProxyModeAnnotation
+	proxyModeHaproxy                = "haproxy"
 	betaProxyModeAnnotation         = "net.beta.kubernetes.io/proxy-mode"
 )
 
 func checkKnownProxyMode(proxyMode string) bool {
 	switch proxyMode {
-	case "", proxyModeUserspace, proxyModeIptables:
+	case "", proxyModeUserspace, proxyModeIptables, proxyModeHaproxy:
 		return true
 	}
 	return false
@@ -196,7 +198,8 @@ func NewProxyServerDefault(config *options.ProxyServerConfig) (*ProxyServer, err
 	var endpointsHandler proxyconfig.EndpointsConfigHandler
 
 	proxyMode := getProxyMode(string(config.Mode), client.Nodes(), hostname, iptInterface, iptables.LinuxKernelCompatTester{})
-	if proxyMode == proxyModeIptables {
+	switch proxyMode {
+	case proxyModeIptables:
 		glog.V(0).Info("Using iptables Proxier.")
 		if config.IPTablesMasqueradeBit == nil {
 			// IPTablesMasqueradeBit must be specified or defaulted.
@@ -212,11 +215,19 @@ func NewProxyServerDefault(config *options.ProxyServerConfig) (*ProxyServer, err
 		// No turning back. Remove artifacts that might still exist from the userspace Proxier.
 		glog.V(0).Info("Tearing down userspace rules.")
 		userspace.CleanupLeftovers(iptInterface)
-	} else {
-		glog.V(0).Info("Using userspace Proxier.")
+	case proxyModeHaproxy:
+		glog.V(2).Info("Using pod-buildin-haproxy proxy.")
+		proxierBuildin, err := haproxy.NewProxier(config.ConfigSyncPeriod, client, config.DisableHyperInternalService)
+		if err != nil {
+			glog.Fatalf("Unable to create proxier: %v", err)
+		}
+		proxier = proxierBuildin
+		endpointsHandler = proxierBuildin
+	case proxyModeUserspace:
+		glog.V(2).Info("Using userspace Proxier.")
 		// This is a proxy.LoadBalancer which NewProxier needs but has methods we don't need for
 		// our config.EndpointsConfigHandler.
-		loadBalancer := userspace.NewLoadBalancerRR()
+		loadBalancer := userspace.NewLoadBalancerRR(client, false)
 		// set EndpointsConfigHandler to our loadBalancer
 		endpointsHandler = loadBalancer
 
@@ -227,6 +238,8 @@ func NewProxyServerDefault(config *options.ProxyServerConfig) (*ProxyServer, err
 			*utilnet.ParsePortRangeOrDie(config.PortRange),
 			config.IPTablesSyncPeriod.Duration,
 			config.UDPIdleTimeout.Duration,
+			client,
+			false,
 		)
 		if err != nil {
 			glog.Fatalf("Unable to create proxier: %v", err)
@@ -235,6 +248,8 @@ func NewProxyServerDefault(config *options.ProxyServerConfig) (*ProxyServer, err
 		// Remove artifacts from the pure-iptables Proxier.
 		glog.V(0).Info("Tearing down pure-iptables proxy rules.")
 		iptables.CleanupLeftovers(iptInterface)
+	default:
+		glog.Fatalf("Proxy type %s is not supported", proxyMode)
 	}
 	iptInterface.AddReloadFunc(proxier.Sync)
 
@@ -247,6 +262,30 @@ func NewProxyServerDefault(config *options.ProxyServerConfig) (*ProxyServer, err
 
 	endpointsConfig := proxyconfig.NewEndpointsConfig()
 	endpointsConfig.RegisterHandler(endpointsHandler)
+
+	// Enable userspace proxier to process services in namespaces without network
+	if proxyMode == proxyModeHaproxy {
+		loadBalancer := userspace.NewLoadBalancerRR(client, true)
+		endpointsConfig.RegisterHandler(loadBalancer)
+
+		proxierUserspace, err := userspace.NewProxier(
+			loadBalancer,
+			net.ParseIP(config.BindAddress),
+			iptInterface,
+			*utilnet.ParsePortRangeOrDie(config.PortRange),
+			config.IPTablesSyncPeriod.Duration,
+			config.UDPIdleTimeout.Duration,
+			client,
+			true,
+		)
+		if err != nil {
+			glog.Fatalf("Unable to create proxier: %v", err)
+		}
+		serviceConfig.RegisterHandler(proxierUserspace)
+
+		// Remove artifacts from the pure-iptables Proxier.
+		iptables.CleanupLeftovers(iptInterface)
+	}
 
 	proxyconfig.NewSourceAPI(
 		client,
@@ -322,6 +361,10 @@ type nodeGetter interface {
 }
 
 func getProxyMode(proxyMode string, client nodeGetter, hostname string, iptver iptables.IptablesVersioner, kcompat iptables.KernelCompatTester) string {
+	if proxyMode == proxyModeHaproxy {
+		return proxyModeHaproxy
+	}
+
 	if proxyMode == proxyModeUserspace {
 		return proxyModeUserspace
 	} else if proxyMode == proxyModeIptables {

@@ -281,6 +281,10 @@ func (c *Fake) Autoscaling() client.AutoscalingInterface {
 	return &FakeAutoscaling{c}
 }
 
+func (c *Fake) Networks() client.NetworkInterface {
+	return &FakeNetworks{Fake: c}
+}
+
 func (c *Fake) Batch() client.BatchInterface {
 	return &FakeBatch{c}
 }

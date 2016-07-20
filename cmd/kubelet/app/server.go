@@ -58,6 +58,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/network"
 	"k8s.io/kubernetes/pkg/kubelet/server"
 	kubetypes "k8s.io/kubernetes/pkg/kubelet/types"
+	"k8s.io/kubernetes/pkg/networkprovider"
 	"k8s.io/kubernetes/pkg/util"
 	"k8s.io/kubernetes/pkg/util/configz"
 	"k8s.io/kubernetes/pkg/util/flock"
@@ -180,57 +181,75 @@ func UnsecuredKubeletConfig(s *options.KubeletServer) (*KubeletConfig, error) {
 		return nil, err
 	}
 
+	// network plugins
+	networkPluginName := s.NetworkPluginName
+	networkPlugins := ProbeNetworkPlugins(s.NetworkPluginDir)
+
+	if s.NetworkProvider != "" {
+		ProbeNetworkProviders(s.NetworkProvider)
+		networkProvider, err := networkprovider.InitNetworkProvider(s.NetworkProvider)
+		if err != nil {
+			glog.Errorf("Network provider could not be initialized: %v", err)
+			return nil, err
+		} else {
+			networkPlugins = append(networkPlugins, NewRemoteNetworkPlugin(networkProvider))
+			networkPluginName = "NetworkProvider"
+		}
+	}
+
 	return &KubeletConfig{
-		Address:                   net.ParseIP(s.Address),
-		AllowPrivileged:           s.AllowPrivileged,
-		Auth:                      nil, // default does not enforce auth[nz]
-		CAdvisorInterface:         nil, // launches background processes, not set here
-		VolumeStatsAggPeriod:      s.VolumeStatsAggPeriod.Duration,
-		CgroupRoot:                s.CgroupRoot,
-		Cloud:                     nil, // cloud provider might start background processes
-		ClusterDNS:                net.ParseIP(s.ClusterDNS),
-		ClusterDomain:             s.ClusterDomain,
-		ConfigFile:                s.Config,
-		ConfigureCBR0:             s.ConfigureCBR0,
-		ContainerManager:          nil,
-		ContainerRuntime:          s.ContainerRuntime,
-		CPUCFSQuota:               s.CPUCFSQuota,
-		DiskSpacePolicy:           diskSpacePolicy,
-		DockerClient:              dockertools.ConnectToDockerOrDie(s.DockerEndpoint),
-		RuntimeCgroups:            s.RuntimeCgroups,
-		DockerExecHandler:         dockerExecHandler,
-		EnableCustomMetrics:       s.EnableCustomMetrics,
-		EnableDebuggingHandlers:   s.EnableDebuggingHandlers,
-		EnableServer:              s.EnableServer,
-		EventBurst:                s.EventBurst,
-		EventRecordQPS:            s.EventRecordQPS,
-		FileCheckFrequency:        s.FileCheckFrequency.Duration,
-		HostnameOverride:          s.HostnameOverride,
-		HostNetworkSources:        hostNetworkSources,
-		HostPIDSources:            hostPIDSources,
-		HostIPCSources:            hostIPCSources,
-		HTTPCheckFrequency:        s.HTTPCheckFrequency.Duration,
-		ImageGCPolicy:             imageGCPolicy,
-		KubeClient:                nil,
-		ManifestURL:               s.ManifestURL,
-		ManifestURLHeader:         manifestURLHeader,
-		MasterServiceNamespace:    s.MasterServiceNamespace,
-		MaxContainerCount:         s.MaxContainerCount,
-		MaxOpenFiles:              s.MaxOpenFiles,
-		MaxPerPodContainerCount:   s.MaxPerPodContainerCount,
-		MaxPods:                   s.MaxPods,
-		MinimumGCAge:              s.MinimumGCAge.Duration,
-		Mounter:                   mounter,
-		NetworkPluginName:         s.NetworkPluginName,
-		NetworkPlugins:            ProbeNetworkPlugins(s.NetworkPluginDir),
-		NodeLabels:                s.NodeLabels,
-		NodeStatusUpdateFrequency: s.NodeStatusUpdateFrequency.Duration,
-		NonMasqueradeCIDR:         s.NonMasqueradeCIDR,
-		OOMAdjuster:               oom.NewOOMAdjuster(),
-		OSInterface:               kubecontainer.RealOS{},
-		PodCIDR:                   s.PodCIDR,
-		ReconcileCIDR:             s.ReconcileCIDR,
-		PodInfraContainerImage:    s.PodInfraContainerImage,
+		Address:                     net.ParseIP(s.Address),
+		AllowPrivileged:             s.AllowPrivileged,
+		Auth:                        nil, // default does not enforce auth[nz]
+		CAdvisorInterface:           nil, // launches background processes, not set here
+		VolumeStatsAggPeriod:        s.VolumeStatsAggPeriod.Duration,
+		CgroupRoot:                  s.CgroupRoot,
+		CinderConfig:                s.CinderConfig,
+		Cloud:                       nil, // cloud provider might start background processes
+		ClusterDNS:                  net.ParseIP(s.ClusterDNS),
+		ClusterDomain:               s.ClusterDomain,
+		ConfigFile:                  s.Config,
+		ConfigureCBR0:               s.ConfigureCBR0,
+		ContainerManager:            nil,
+		ContainerRuntime:            s.ContainerRuntime,
+		CPUCFSQuota:                 s.CPUCFSQuota,
+		DiskSpacePolicy:             diskSpacePolicy,
+		DockerClient:                dockertools.ConnectToDockerOrDie(s.DockerEndpoint),
+		RuntimeCgroups:              s.RuntimeCgroups,
+		DockerExecHandler:           dockerExecHandler,
+		EnableCustomMetrics:         s.EnableCustomMetrics,
+		EnableDebuggingHandlers:     s.EnableDebuggingHandlers,
+		EnableServer:                s.EnableServer,
+		EventBurst:                  s.EventBurst,
+		EventRecordQPS:              s.EventRecordQPS,
+		FileCheckFrequency:          s.FileCheckFrequency.Duration,
+		HostnameOverride:            s.HostnameOverride,
+		HostNetworkSources:          hostNetworkSources,
+		HostPIDSources:              hostPIDSources,
+		HostIPCSources:              hostIPCSources,
+		HTTPCheckFrequency:          s.HTTPCheckFrequency.Duration,
+		ImageGCPolicy:               imageGCPolicy,
+		KubeClient:                  nil,
+		ManifestURL:                 s.ManifestURL,
+		ManifestURLHeader:           manifestURLHeader,
+		MasterServiceNamespace:      s.MasterServiceNamespace,
+		MaxContainerCount:           s.MaxContainerCount,
+		MaxOpenFiles:                s.MaxOpenFiles,
+		MaxPerPodContainerCount:     s.MaxPerPodContainerCount,
+		MaxPods:                     s.MaxPods,
+		MinimumGCAge:                s.MinimumGCAge.Duration,
+		Mounter:                     mounter,
+		NetworkPluginName:           networkPluginName,
+		NetworkPlugins:              networkPlugins,
+		NodeLabels:                  s.NodeLabels,
+		NodeStatusUpdateFrequency:   s.NodeStatusUpdateFrequency.Duration,
+		NonMasqueradeCIDR:           s.NonMasqueradeCIDR,
+		OOMAdjuster:                 oom.NewOOMAdjuster(),
+		OSInterface:                 kubecontainer.RealOS{},
+		PodCIDR:                     s.PodCIDR,
+		ReconcileCIDR:               s.ReconcileCIDR,
+		PodInfraContainerImage:      s.PodInfraContainerImage,
+		DisableHyperInternalService: s.DisableHyperInternalService,
 		Port:                           s.Port,
 		ReadOnlyPort:                   s.ReadOnlyPort,
 		RegisterNode:                   s.RegisterNode,
@@ -696,6 +715,7 @@ type KubeletConfig struct {
 	CAdvisorInterface              cadvisor.Interface
 	VolumeStatsAggPeriod           time.Duration
 	CgroupRoot                     string
+	CinderConfig                   string
 	Cloud                          cloudprovider.Interface
 	ClusterDNS                     net.IP
 	ClusterDomain                  string
@@ -704,6 +724,7 @@ type KubeletConfig struct {
 	ContainerManager               cm.ContainerManager
 	ContainerRuntime               string
 	CPUCFSQuota                    bool
+	DisableHyperInternalService    bool
 	DiskSpacePolicy                kubelet.DiskSpacePolicy
 	DockerClient                   dockertools.DockerInterface
 	RuntimeCgroups                 string
@@ -807,6 +828,7 @@ func CreateAndInitKubelet(kc *KubeletConfig) (k KubeletBootstrap, pc *config.Pod
 		kc.NodeName,
 		kc.DockerClient,
 		kubeClient,
+		kc.CinderConfig,
 		kc.RootDirectory,
 		kc.PodInfraContainerImage,
 		kc.SyncFrequency,
@@ -862,6 +884,7 @@ func CreateAndInitKubelet(kc *KubeletConfig) (k KubeletBootstrap, pc *config.Pod
 		kc.HairpinMode,
 		kc.BabysitDaemons,
 		kc.Options,
+		kc.DisableHyperInternalService,
 	)
 
 	if err != nil {

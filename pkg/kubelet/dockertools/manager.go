@@ -304,7 +304,7 @@ func (dm *DockerManager) determineContainerIP(podNamespace, podName string, cont
 	}
 
 	if dm.networkPlugin.Name() != network.DefaultPluginName {
-		netStatus, err := dm.networkPlugin.Status(podNamespace, podName, kubecontainer.DockerID(container.ID))
+		netStatus, err := dm.networkPlugin.Status(podNamespace, podName, kubecontainer.DockerID(container.ID), "docker")
 		if err != nil {
 			glog.Errorf("NetworkPlugin %s failed on the status hook for pod '%s' - %v", dm.networkPlugin.Name(), podName, err)
 		} else if netStatus != nil {
@@ -964,6 +964,11 @@ func (dm *DockerManager) checkVersionCompatibility() error {
 	return nil
 }
 
+// Name returns the name of the container runtime
+func (dm *DockerManager) Name() string {
+	return "docker"
+}
+
 // The first version of docker that supports exec natively is 1.3.0 == API 1.15
 var dockerAPIVersionWithExec = "1.15"
 
@@ -1291,7 +1296,7 @@ func (dm *DockerManager) killPodWithSyncResult(pod *api.Pod, runningPod kubecont
 		if getDockerNetworkMode(ins) != namespaceModeHost {
 			teardownNetworkResult := kubecontainer.NewSyncResult(kubecontainer.TeardownNetwork, kubecontainer.BuildPodFullName(runningPod.Name, runningPod.Namespace))
 			result.AddSyncResult(teardownNetworkResult)
-			if err := dm.networkPlugin.TearDownPod(runningPod.Namespace, runningPod.Name, kubecontainer.DockerID(networkContainer.ID.ID)); err != nil {
+			if err := dm.networkPlugin.TearDownPod(runningPod.Namespace, runningPod.Name, kubecontainer.DockerID(networkContainer.ID.ID), "docker"); err != nil {
 				message := fmt.Sprintf("Failed to teardown network for pod %q using network plugins %q: %v", runningPod.ID, dm.networkPlugin.Name(), err)
 				teardownNetworkResult.Fail(kubecontainer.ErrTeardownNetwork, message)
 				glog.Error(message)
@@ -1863,7 +1868,7 @@ func (dm *DockerManager) SyncPod(pod *api.Pod, _ api.PodStatus, podStatus *kubec
 		result.AddSyncResult(setupNetworkResult)
 		if !usesHostNetwork(pod) {
 			// Call the networking plugin
-			err = dm.networkPlugin.SetUpPod(pod.Namespace, pod.Name, podInfraContainerID)
+			err = dm.networkPlugin.SetUpPod(pod.Namespace, pod.Name, podInfraContainerID, "docker")
 			if err != nil {
 				// TODO: (random-liu) There shouldn't be "Skipping pod" in sync result message
 				message := fmt.Sprintf("Failed to setup network for pod %q using network plugins %q: %v; Skipping pod", format.Pod(pod), dm.networkPlugin.Name(), err)

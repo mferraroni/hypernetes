@@ -40,6 +40,7 @@ chaos-chance
 clean-start
 cleanup
 cleanup-iptables
+cinder-config
 client-ca-file
 client-certificate
 client-key
@@ -83,6 +84,7 @@ disable-filter
 docker-email
 docker-endpoint
 docker-exec-handler
+disable-hyper-internal-service
 docker-password
 docker-server
 docker-username
@@ -255,6 +257,7 @@ network-plugin
 network-plugin-dir
 no-headers
 no-suggestions
+network-provider
 node-instance-group
 node-ip
 node-labels

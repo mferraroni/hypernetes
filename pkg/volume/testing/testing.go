@@ -42,6 +42,7 @@ type fakeVolumeHost struct {
 	kubeClient clientset.Interface
 	pluginMgr  VolumePluginMgr
 	cloud      cloudprovider.Interface
+	cinderConf string
 	mounter    mount.Interface
 	writer     io.Writer
 }
@@ -72,6 +73,14 @@ func (f *fakeVolumeHost) GetKubeClient() clientset.Interface {
 
 func (f *fakeVolumeHost) GetCloudProvider() cloudprovider.Interface {
 	return f.cloud
+}
+
+func (f *fakeVolumeHost) GetCinderConfig() string {
+	return f.cinderConf
+}
+
+func (f *fakeVolumeHost) IsNoMountSupported() bool {
+	return false
 }
 
 func (f *fakeVolumeHost) GetMounter() mount.Interface {
@@ -221,6 +230,10 @@ func (fv *FakeVolume) GetPath() string {
 	return path.Join(fv.Plugin.Host.GetPodVolumeDir(fv.PodUID, utilstrings.EscapeQualifiedNameForDisk(fv.Plugin.PluginName), fv.VolName))
 }
 
+func (fv *FakeVolume) GetMetaData() map[string]interface{} {
+	return nil
+}
+
 func (fv *FakeVolume) TearDown() error {
 	return fv.TearDownAt(fv.GetPath())
 }
@@ -249,6 +262,14 @@ func (fr *fakeRecycler) Recycle() error {
 
 func (fr *fakeRecycler) GetPath() string {
 	return fr.path
+}
+
+func (fr *fakeRecycler) IsNoMountSupported() bool {
+	return false
+}
+
+func (fr *fakeRecycler) GetMetaData() map[string]interface{} {
+	return nil
 }
 
 func NewFakeRecycler(spec *Spec, host VolumeHost, config VolumeConfig) (Recycler, error) {
@@ -324,4 +345,12 @@ func FindEmptyDirectoryUsageOnTmpfs() (*resource.Quantity, error) {
 	}
 	used.Format = resource.BinarySI
 	return used, nil
+}
+
+func (fd *FakeDeleter) IsNoMountSupported() bool {
+	return false
+}
+
+func (fd *FakeDeleter) GetMetaData() map[string]interface{} {
+	return nil
 }

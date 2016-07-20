@@ -98,6 +98,10 @@ func (vh *volumeHost) GetCloudProvider() cloudprovider.Interface {
 	return vh.kubelet.cloud
 }
 
+func (vh *volumeHost) GetCinderConfig() string {
+	return vh.kubelet.cinderConfig
+}
+
 func (vh *volumeHost) GetMounter() mount.Interface {
 	return vh.kubelet.mounter
 }
@@ -109,6 +113,10 @@ func (vh *volumeHost) GetWriter() io.Writer {
 // Returns the hostname of the host kubelet is running on
 func (vh *volumeHost) GetHostName() string {
 	return vh.kubelet.hostname
+}
+
+func (vh *volumeHost) IsNoMountSupported() bool {
+	return vh.kubelet.GetRuntime().Type() == "hyper"
 }
 
 func (kl *Kubelet) mountExternalVolumes(pod *api.Pod) (kubecontainer.VolumeMap, error) {

@@ -172,6 +172,14 @@ type VolumeHost interface {
 	// Get cloud provider from kubelet.
 	GetCloudProvider() cloudprovider.Interface
 
+	// Get cinder configure file from kubelet.
+	GetCinderConfig() string
+
+	// Check if no-mount is supported
+	// It is useful when container runtime accepts raw volume config which is not
+	// mounted on host
+	IsNoMountSupported() bool
+
 	// Get mounter interface.
 	GetMounter() mount.Interface
 

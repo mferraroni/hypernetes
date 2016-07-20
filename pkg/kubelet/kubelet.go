@@ -52,6 +52,7 @@ import (
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	"k8s.io/kubernetes/pkg/kubelet/dockertools"
 	"k8s.io/kubernetes/pkg/kubelet/envvars"
+	"k8s.io/kubernetes/pkg/kubelet/hyper"
 	"k8s.io/kubernetes/pkg/kubelet/metrics"
 	"k8s.io/kubernetes/pkg/kubelet/network"
 	"k8s.io/kubernetes/pkg/kubelet/pleg"
@@ -161,6 +162,7 @@ func NewMainKubelet(
 	nodeName string,
 	dockerClient dockertools.DockerInterface,
 	kubeClient clientset.Interface,
+	cinderConfig string,
 	rootDirectory string,
 	podInfraContainerImage string,
 	resyncInterval time.Duration,
@@ -216,6 +218,7 @@ func NewMainKubelet(
 	hairpinMode string,
 	babysitDaemons bool,
 	kubeOptions []Option,
+	disableHyperInternalService bool,
 ) (*Kubelet, error) {
 	if rootDirectory == "" {
 		return nil, fmt.Errorf("invalid root directory %q", rootDirectory)
@@ -291,6 +294,7 @@ func NewMainKubelet(
 	klet := &Kubelet{
 		hostname:                       hostname,
 		nodeName:                       nodeName,
+		cinderConfig:                   cinderConfig,
 		dockerClient:                   dockerClient,
 		kubeClient:                     kubeClient,
 		rootDirectory:                  rootDirectory,
@@ -338,6 +342,7 @@ func NewMainKubelet(
 		reservation:                  reservation,
 		enableCustomMetrics:          enableCustomMetrics,
 		babysitDaemons:               babysitDaemons,
+		disableHyperInternalService:  disableHyperInternalService,
 	}
 	// TODO: Factor out "StatsProvider" from Kubelet so we don't have a cyclic dependency
 	klet.resourceAnalyzer = stats.NewResourceAnalyzer(klet, volumeStatsAggPeriod)
@@ -429,6 +434,26 @@ func NewMainKubelet(
 			return nil, err
 		}
 		klet.containerRuntime = rktRuntime
+	case "hyper":
+		hyperRuntime, err := hyper.New(
+			klet,
+			recorder,
+			klet.networkPlugin,
+			containerRefManager,
+			klet.livenessManager,
+			klet.volumeManager,
+			klet.kubeClient,
+			imageBackOff,
+			serializeImagePulls,
+			klet.httpClient,
+			klet.disableHyperInternalService,
+			containerLogsDir,
+			osInterface,
+		)
+		if err != nil {
+			return nil, err
+		}
+		klet.containerRuntime = hyperRuntime
 	default:
 		return nil, fmt.Errorf("unsupported container runtime %q specified", containerRuntime)
 	}
@@ -647,6 +672,8 @@ type Kubelet struct {
 	//    status. Kubelet may fail to update node status reliably if the value is too small,
 	//    as it takes time to gather all necessary node information.
 	nodeStatusUpdateFrequency time.Duration
+	// Cinder auth configure file
+	cinderConfig string
 
 	// Generates pod events.
 	pleg pleg.PodLifecycleEventGenerator
@@ -753,6 +780,9 @@ type Kubelet struct {
 
 	// handlers called during the tryUpdateNodeStatus cycle
 	setNodeStatusFuncs []func(*api.Node) error
+
+	// Disable the internal haproxy service in Hyper pods
+	disableHyperInternalService bool
 }
 
 // Validate given node IP belongs to the current host
@@ -3499,23 +3529,40 @@ func (kl *Kubelet) ResyncInterval() time.Duration {
 
 // GetContainerInfo returns stats (from Cadvisor) for a container.
 func (kl *Kubelet) GetContainerInfo(podFullName string, podUID types.UID, containerName string, req *cadvisorapi.ContainerInfoRequest) (*cadvisorapi.ContainerInfo, error) {
-
+	cadvisorID := podFullName
 	podUID = kl.podManager.TranslatePodUID(podUID)
-
 	pods, err := kl.runtimeCache.GetPods()
 	if err != nil {
 		return nil, err
 	}
 	pod := kubecontainer.Pods(pods).FindPod(podFullName, podUID)
-	container := pod.FindContainerByName(containerName)
-	if container == nil {
-		return nil, kubecontainer.ErrContainerNotFound
+
+	// Get container stats
+	if len(containerName) > 0 {
+		container := pod.FindContainerByName(containerName)
+		if container == nil {
+			return nil, kubecontainer.ErrContainerNotFound
+		}
+
+		cadvisorID = container.ID.ID
 	}
 
-	ci, err := kl.cadvisor.DockerContainer(container.ID.ID, req)
+	var ci cadvisorapi.ContainerInfo
+	switch kl.containerRuntime.Type() {
+	case "docker":
+		ci, err = kl.cadvisor.DockerContainer(cadvisorID, req)
+	case "hyper":
+		// TODO(feisky): Hyper container stats is not supported
+		cadvisorID = podFullName
+		ci, err = kl.cadvisor.HyperContainer(cadvisorID, req)
+	default:
+		err = fmt.Errorf("Container runtime %v not supported", kl.containerRuntime.Type())
+	}
+
 	if err != nil {
 		return nil, err
 	}
+
 	return &ci, nil
 }
 
