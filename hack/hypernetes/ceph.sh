@@ -66,6 +66,7 @@ function kube::util::setup_cinder() {
 	
 	## create pool for cinder
 	ceph osd pool create cinder 256 256
+	rbd feature disable cinder exclusive-lock object-map fast-diff deep-flatten
 	ceph auth get-or-create client.cinder mon 'allow r' osd 'allow class-read object_prefix rbd_children, allow rwx pool=cinder'
 
 	## auth for cinder
