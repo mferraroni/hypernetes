@@ -23,7 +23,7 @@ function kube::util::setup_openstack() {
 	
 	# make sure yum is not running
 	kube::util::ensure_yum_ready
-	yum install -y centos-release-openstack-mitaka
+	yum install -y centos-release-openstack-mitaka epel-release
 	yum update -y
 	yum install -y openstack-packstack
 
@@ -43,6 +43,7 @@ function kube::util::setup_openstack() {
 	sed -i 's/CONFIG_AODH_INSTALL=y/CONFIG_AODH_INSTALL=n/g' /root/packstack_answer_file.txt
 	sed -i 's/CONFIG_GNOCCHI_INSTALL=y/CONFIG_GNOCCHI_INSTALL=n/g' /root/packstack_answer_file.txt
 	sed -i 's/CONFIG_GLANCE_INSTALL=y/CONFIG_GLANCE_INSTALL=n/g' /root/packstack_answer_file.txt
+	sed -i 's/CONFIG_USE_EPEL=n/CONFIG_USE_EPEL=y/g' /root/packstack_answer_file.txt
 
 	# Install OpenStack
 	packstack --answer-file=/root/packstack_answer_file.txt
@@ -64,5 +65,7 @@ function kube::util::setup_openstack() {
 function kube::util::clean_neutron_resource() {
 	local tenant_name=$1
 	local tenant_id=`keystone tenant-list 2>/dev/null | grep ${tenant_name} | awk '{print $2}'`
-	neutron purge $tenant_id
+	if [ "${tenant_id}" != "" ]; then
+		neutron purge ${tenant_id}
+	fi
 }

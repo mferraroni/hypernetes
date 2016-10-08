@@ -11,7 +11,7 @@ Note: The script should be run as `root`.
 1. Setup environment variables:
 
 ```sh
-export HOSTNAME="k8s"
+export HOSTNAME=$(hostname)
 export IF_NAME="eth0"
 export IF_IP=""
 export GOPATH="/gopath"
@@ -47,6 +47,6 @@ yum -y update
 
 ### Install failed due to slow network
 
-For slow networks, the installation may fail with timeout. When this happens, just comment out successed steps from `hack/local-up-hypernetes.sh` and re-run the script to continue the installation.
+For slow networks, the installation may fail with timeout. When this happens, just run the `hack/local-up-hypernetes.sh` script again to continue the installation.
 
 [![Analytics](https://kubernetes-site.appspot.com/UA-36037335-10/GitHub/hack/hypernetes/README.md?pixel)]()
