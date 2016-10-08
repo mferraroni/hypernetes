@@ -42,6 +42,7 @@ function kube::util::do_setup_ceph() {
 	cd /root/ceph-cluster
 	ceph-deploy new $HOSTNAME
 	echo "osd pool default size = 1" >> ceph.conf
+  echo "rbd default features = 3" >> ceph.conf
 
 	ceph-deploy install $HOSTNAME
 
@@ -66,7 +67,7 @@ function kube::util::setup_cinder() {
 	
 	## create pool for cinder
 	ceph osd pool create cinder 256 256
-	rbd feature disable cinder exclusive-lock object-map fast-diff deep-flatten
+	#rbd feature disable cinder exclusive-lock object-map fast-diff deep-flatten
 	ceph auth get-or-create client.cinder mon 'allow r' osd 'allow class-read object_prefix rbd_children, allow rwx pool=cinder'
 
 	## auth for cinder
@@ -93,7 +94,8 @@ EOF
 	sed -i 's/^enabled_backends.*$/enabled_backends = ceph/g' /etc/cinder/cinder.conf
 
 	systemctl | awk '/cinder/{print $1}' | while read line; do
-	    systemctl restart $line
+		echo "Restarting $line ..."
+		systemctl restart $line
 	done
 }
 
