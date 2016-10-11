@@ -20,7 +20,7 @@ set -o pipefail
 
 function kube::util::download_hypernetes() {
 	echo "Start $FUNCNAME"
-	yum -y install kubernetes etcd
+	yum -y install etcd
 	curl -p -SL https://github.com/hyperhq/hypernetes/releases/download/v1.3.1/kubernetes-server-linux-amd64.tar.gz -o /tmp/kubernetes-server-linux-amd64.tar.gz
   cd /tmp
 	tar zxvf /tmp/kubernetes-server-linux-amd64.tar.gz
@@ -38,8 +38,12 @@ function kube::util::build_hypernetes() {
 function kube::util::setup_hypernetes() {
 	echo "Start $FUNCNAME"
 
-	rm -rf /var/lib/kubernetes /srv/kubernetes /var/log/kubernetes /var/run/kubernetes
-	mkdir -p /var/lib/kubernetes /srv/kubernetes  /var/log/kubernetes /var/run/kubernetes
+	cat /etc/group | grep kube >/dev/null || groupadd -r kube
+	cat /etc/passwd | grep kube >/dev/null || useradd -r -g kube -d / -s /sbin/nologin -c "Kubernetes user" kube
+
+	rm -rf /var/lib/kubernetes /srv/kubernetes /var/log/kubernetes /var/run/kubernetes /etc/kubernetes
+	mkdir -p /var/lib/kubernetes /srv/kubernetes  /var/log/kubernetes /var/run/kubernetes /etc/kubernetes
+
 	chown kube:kube /var/log/kubernetes/
 	chown kube:kube /var/run/kubernetes/
 	chown kube:kube /srv/kubernetes
@@ -96,6 +100,13 @@ region = RegionOne
 keyring = "${RBD_KEY}"
 EOF
 
+	cd ${GO_K8S_ROOT}/kubernetes/hack/hypernetes/service
+	cp kube-apiserver.service /usr/lib/systemd/system/kube-apiserver.service
+	cp kube-controller-manager.service /usr/lib/systemd/system/kube-controller-manager.service
+	cp kubelet.service /usr/lib/systemd/system/kubelet.service
+	cp kube-proxy.service /usr/lib/systemd/system/kube-proxy.service
+	cp kube-scheduler.service /usr/lib/systemd/system/kube-scheduler.service
+
 	systemctl restart etcd
 	systemctl restart kubestack
 	systemctl restart kube-apiserver
@@ -115,7 +126,7 @@ EOF
 
 function kube::util::setup_kubectl() {
 	echo "Start $FUNCNAME"
-	
+
 	kubectl config set-cluster default --server=http://${IF_IP}:8080 --insecure-skip-tls-verify=true
 	kubectl config set-context default --cluster=default
 	kubectl config use-context default
