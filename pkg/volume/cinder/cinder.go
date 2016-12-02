@@ -418,6 +418,7 @@ func (c *cinderVolumeUnmounter) TearDown() error {
 // resource was the last reference to that disk on the kubelet.
 func (c *cinderVolumeUnmounter) TearDownAt(dir string) error {
 	glog.V(5).Infof("Cinder TearDown of %s", dir)
+
 	notmnt, err := c.mounter.IsLikelyNotMountPoint(dir)
 	if err != nil {
 		glog.V(4).Infof("IsLikelyNotMountPoint check failed: %v", err)
@@ -480,20 +481,6 @@ func (c *cinderVolumeUnmounter) TearDownAt(dir string) error {
 		return err
 	}
 	glog.V(3).Infof("Successfully unmounted: %s\n", dir)
-
-	// NOTE(harryz) use manager to detach disk,refactor this into cinder.attacher when manager is removed
-	// If refCount is 1, then all bind mounts have been removed, and the
-	// remaining reference is the global mount. It is safe to detach.
-	if !c.withOpenStackCP && c.isNoMountSupported {
-		if len(refs) == 1 {
-			if err := c.manager.DetachDisk(c); err != nil {
-				glog.V(4).Infof("DetachDisk failed: %v", err)
-				return err
-			}
-			glog.V(3).Infof("Volume %s detached", c.pdName)
-		}
-	}
-	// NOTE END
 
 	notmnt, mntErr := c.mounter.IsLikelyNotMountPoint(dir)
 	if mntErr != nil {
