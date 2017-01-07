@@ -193,7 +193,7 @@ func parseTimeString(str string) (time.Time, error) {
 		return t, nil
 	}
 
-	layout := "2006-01-02T15:04:05Z"
+	layout := time.RFC3339
 	t, err := time.Parse(layout, str)
 	if err != nil {
 		return t, err
