@@ -23,12 +23,12 @@ function kube::util::verify_system() {
 
 	version=$(cat /etc/redhat-release)
 	if [[ "$version" == "" ]]; then
-		echo "Only CentOS 7.2 is supported."
+		echo "Only CentOS 7 or newer is supported."
 		exit 1
 	fi
 
-	if ! [[ "$version" =~ "CentOS Linux release 7.2" ]]; then
-		echo "Only CentOS 7.2 is supported."
+	if ! [[ "$version" =~ "CentOS Linux release 7." ]]; then
+		echo "Only CentOS 7 or newer is supported."
 		echo "Run 'yum -y update' upgrade the system."
 		exit 1
 	fi
