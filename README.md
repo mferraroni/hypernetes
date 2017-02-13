@@ -30,6 +30,7 @@ Please check [h8s getting started guide](hack/hypernetes/README.md) to play with
 
 * [Documentation](https://github.com/hyperhq/hypernetes-book)
 * [Get Started](https://github.com/hyperhq/hypernetes-book/blob/master/user-guide/user-guide.md)
+* [Roadmap](ROADMAP.md)
 
 ## Contact Us
 
