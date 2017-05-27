@@ -32,7 +32,7 @@ clear_emulator_capabilities = 0
 EOF
 
 	if ! rpm -qa | grep ${CENTOS_HYPER} &>/dev/null ; then
-		curl -sSl http://hypercontainer.io/install | bash
+		curl -sSL http://hypercontainer.io/install | bash
 	fi
 
 	cat >/etc/hyper/config <<EOF
